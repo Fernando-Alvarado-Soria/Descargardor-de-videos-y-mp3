@@ -14,7 +14,7 @@ git clone https://github.com/Fernando-Alvarado-Soria/Descargardor-de-videos-y-mp
 cd Descargardor-de-videos-y-mp3
 python -m venv venv
 venv\Scripts\activate  # Windows | source venv/bin/activate en Linux/Mac
-pip install -U "yt-dlp[default]"
+pip install -r requirements.txt  # Usa versiones fijas probadas
 
 # 2. Instala Deno (REQUERIDO para YouTube)
 # Windows PowerShell:
@@ -72,12 +72,28 @@ source venv/bin/activate
 ```
 
 ### 3️⃣ Instala las dependencias de Python
+
+**⚠️ IMPORTANTE:** Este proyecto usa versiones fijas de dependencias para garantizar estabilidad.
+
 ```bash
-pip install -U "yt-dlp[default]"
+# Instala las dependencias con versiones exactas
 pip install -r requirements.txt
 ```
 
-> ⚠️ **Importante:** Usa el comando completo `pip install -U "yt-dlp[default]"` para instalar yt-dlp con todas sus dependencias necesarias.
+El archivo `requirements.txt` contiene versiones específicas que se sabe que funcionan correctamente juntas. Esto incluye:
+- `yt-dlp==2026.3.17` - Versión probada del descargador
+- `yt-dlp-ejs==0.8.0` - Soporte para JavaScript de YouTube
+- Y todas las demás dependencias
+
+**Si en el futuro algo deja de funcionar** (YouTube cambia su estructura):
+
+```bash
+# Actualiza solo yt-dlp a la última versión
+pip install -U "yt-dlp[default]"
+
+# Si funciona, congela las nuevas versiones
+pip freeze > requirements.txt
+```
 
 ### 4️⃣ Instala Deno (JavaScript Runtime)
 
@@ -279,8 +295,25 @@ Este es solo un warning. Si tienes las cookies configuradas correctamente, puede
 YouTube cambia frecuentemente su estructura. Si algo deja de funcionar:
 
 ```bash
+# Actualiza yt-dlp a la última versión
 pip install -U "yt-dlp[default]"
+
+# Prueba que funcione
+yt-dlp --cookies youtube_cookies.txt "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+# Si funciona correctamente, congela las nuevas versiones
+pip freeze > requirements.txt
+
+# Haz commit de las nuevas versiones
+git add requirements.txt
+git commit -m "Actualizar dependencias - yt-dlp [versión]"
 ```
+
+**¿Por qué usar versiones fijas?**
+- ✅ Evita que actualizaciones automáticas rompan la funcionalidad
+- ✅ Garantiza que todos los usuarios tengan las mismas versiones probadas
+- ✅ Facilita la resolución de problemas
+- ✅ Permite actualizar de forma controlada solo cuando sea necesario
 
 ---
 
