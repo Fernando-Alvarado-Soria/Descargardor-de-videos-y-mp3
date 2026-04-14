@@ -1,8 +1,10 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-import yt_dlp
 import threading
 import os
+from pytubefix import YouTube
+from pytubefix.cli import on_progress
+import yt_dlp
 
 class YouTubeDownloader:
     def __init__(self, root):
@@ -128,67 +130,194 @@ class YouTubeDownloader:
             self.progress_var.set(100)
             self.status_label.config(text="Procesando archivo...")
     
+    def progress_callback(self, stream, chunk, bytes_remaining):
+        """Callback de progreso para pytube"""
+        try:
+            total_size = stream.filesize
+            bytes_downloaded = total_size - bytes_remaining
+            percentage = (bytes_downloaded / total_size) * 100
+            self.root.after(0, lambda: self.progress_var.set(percentage))
+            self.root.after(0, lambda: self.status_label.config(
+                text=f"Descargando... {percentage:.1f}%", foreground="blue"))
+        except:
+            pass
+    
+    def download_with_pytube(self, url):
+        """Método 1: Intentar con pytubefix (más simple y confiable)"""
+        try:
+            print("\n=== Método 1: Usando pytubefix ===")
+            yt = YouTube(url, on_progress_callback=self.progress_callback)
+            
+            print(f"Título: {yt.title}")
+            print(f"Duración: {yt.length}s")
+            
+            if self.format_var.get() == "mp4":
+                # Descargar video
+                quality_map = {
+                    "1080p (Full HD)": "1080p",
+                    "720p (HD)": "720p",
+                    "480p (SD)": "480p"
+                }
+                quality = quality_map[self.quality_var.get()]
+                
+                print(f"Buscando video en {quality}...")
+                
+                # Intentar obtener la calidad solicitada, si no está disponible tomar la mejor
+                stream = yt.streams.filter(progressive=True, file_extension='mp4', resolution=quality).first()
+                
+                if not stream:
+                    print(f"Calidad {quality} no disponible, usando la mejor calidad disponible...")
+                    stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+                
+                if not stream:
+                    print("No se encontró video progresivo, intentando con adaptativo...")
+                    stream = yt.streams.filter(adaptive=True, file_extension='mp4', only_video=False).order_by('resolution').desc().first()
+                
+            else:
+                # Descargar solo audio
+                print("Buscando mejor stream de audio...")
+                stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
+            
+            if not stream:
+                raise Exception("No se encontró ningún stream disponible")
+            
+            print(f"Stream seleccionado: {stream}")
+            
+            # Descargar
+            output_file = stream.download(output_path=self.download_path)
+            
+            # Si es MP3, necesitamos convertir
+            if self.format_var.get() == "mp3":
+                print("Convirtiendo a MP3...")
+                base, ext = os.path.splitext(output_file)
+                new_file = base + '.mp3'
+                
+                # Usar ffmpeg para convertir
+                import subprocess
+                subprocess.run([
+                    'ffmpeg', '-i', output_file,
+                    '-vn', '-acodec', 'libmp3lame',
+                    '-b:a', '320k', new_file, '-y'
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                # Eliminar archivo original
+                if os.path.exists(new_file):
+                    os.remove(output_file)
+                    output_file = new_file
+            
+            return True, output_file
+            
+        except Exception as e:
+            print(f"Error con pytubefix: {e}")
+            return False, str(e)
+    
+    def download_with_ytdlp(self, url):
+        """Método 2: Intentar con yt-dlp (configuración ultra simple)"""
+        try:
+            print("\n=== Método 2: Usando yt-dlp ===")
+            
+            if self.format_var.get() == "mp4":
+                ydl_opts = {
+                    'format': 'best[ext=mp4]/best',
+                    'outtmpl': os.path.join(self.download_path, '%(title)s.%(ext)s'),
+                    'progress_hooks': [self.progress_hook],
+                    'quiet': True,
+                }
+            else:
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'outtmpl': os.path.join(self.download_path, '%(title)s.%(ext)s'),
+                    'progress_hooks': [self.progress_hook],
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '320',
+                    }],
+                    'quiet': True,
+                }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                filename = ydl.prepare_filename(info)
+                
+                # Si es mp3, el archivo tendrá extensión .mp3
+                if self.format_var.get() == "mp3":
+                    base, _ = os.path.splitext(filename)
+                    filename = base + '.mp3'
+                
+                return True, filename
+                
+        except Exception as e:
+            print(f"Error con yt-dlp: {e}")
+            return False, str(e)
+    
+    def clean_youtube_url(self, url):
+        """Limpia la URL de YouTube eliminando parámetros de playlist"""
+        import re
+        
+        # Extraer el video ID
+        patterns = [
+            r'(?:youtube\.com\/watch\?v=)([^&]+)',
+            r'(?:youtu\.be\/)([^?]+)',
+            r'(?:youtube\.com\/embed\/)([^?]+)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                video_id = match.group(1)
+                clean_url = f"https://www.youtube.com/watch?v={video_id}"
+                if clean_url != url:
+                    print(f"URL limpiada: {url} -> {clean_url}")
+                return clean_url
+        
+        return url
+    
     def download_video(self):
         """Función que realiza la descarga en un thread separado"""
         url = self.url_var.get().strip()
         
         if not url:
-            messagebox.showerror("Error", "Por favor ingresa una URL de YouTube")
+            self.root.after(0, lambda: messagebox.showerror("Error", "Por favor ingresa una URL de YouTube"))
             return
         
-        try:
-            # Configuración según formato
-            if self.format_var.get() == "mp4":
-                quality_map = {
-                    "1080p (Full HD)": "1080",
-                    "720p (HD)": "720",
-                    "480p (SD)": "480"
-                }
-                quality = quality_map[self.quality_var.get()]
-                
-                ydl_opts = {
-                    'format': f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]',
-                    'outtmpl': os.path.join(self.download_path, '%(title)s.%(ext)s'),
-                    'progress_hooks': [self.progress_hook],
-                    'merge_output_format': 'mp4'
-                }
-            else:  # mp3
-                quality_map = {
-                    "320 kbps (Máxima)": "320",
-                    "192 kbps (Alta)": "192",
-                    "128 kbps (Estándar)": "128"
-                }
-                bitrate = quality_map[self.quality_var.get()]
-                
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': bitrate,
-                    }],
-                    'outtmpl': os.path.join(self.download_path, '%(title)s.%(ext)s'),
-                    'progress_hooks': [self.progress_hook]
-                }
-            
-            # Descargar
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-            
-            # Actualizar UI
+        # Limpiar URL (remover parámetros de playlist, etc.)
+        url = self.clean_youtube_url(url)
+        
+        print("\n" + "="*60)
+        print(f"Iniciando descarga: {url}")
+        print(f"Formato: {self.format_var.get()}")
+        print(f"Calidad: {self.quality_var.get()}")
+        print("="*60)
+        
+        # Método 1: Intentar con pytubefix primero (más confiable)
+        success, result = self.download_with_pytube(url)
+        
+        if not success:
+            print("\nPytubefix falló, intentando con yt-dlp...")
+            # Método 2: Si falla, intentar con yt-dlp
+            success, result = self.download_with_ytdlp(url)
+        
+        if success:
+            # Éxito
+            self.root.after(0, lambda: self.progress_var.set(100))
             self.root.after(0, lambda: self.status_label.config(
                 text="✅ Descarga completada!", foreground="green"))
             self.root.after(0, lambda: messagebox.showinfo(
-                "Éxito", f"Archivo descargado en:\n{self.download_path}"))
-            
-        except Exception as e:
-            error_msg = str(e)
+                "Éxito", f"Archivo descargado exitosamente:\n\n{result}"))
+            print(f"\n✅ DESCARGA EXITOSA: {result}\n")
+        else:
+            # Error en ambos métodos
+            error_msg = f"No se pudo descargar el video con ningún método.\n\nError: {result}"
             self.root.after(0, lambda: self.status_label.config(
-                text=f"❌ Error: {error_msg}", foreground="red"))
-            self.root.after(0, lambda: messagebox.showerror(
-                "Error", f"Error al descargar:\n{error_msg}"))
-        finally:
-            self.root.after(0, lambda: self.download_button.config(state="normal"))
+                text="❌ Error en la descarga", foreground="red"))
+            self.root.after(0, lambda: messagebox.showerror("Error", error_msg))
+            print(f"\n❌ ERROR: {result}\n")
+        
+        # Reactivar botón
+        self.root.after(0, lambda: self.download_button.config(state="normal"))
+        
+        if not success:
             self.root.after(0, lambda: self.progress_var.set(0))
     
     def start_download(self):

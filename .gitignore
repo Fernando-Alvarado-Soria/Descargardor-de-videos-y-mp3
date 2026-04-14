@@ -14,6 +14,13 @@ __pycache__/
 *.mp3
 *.mp4
 *.webm
+*.m4a
+
+# Archivos sensibles - NO SUBIR
+youtube_cookies.txt
+cookies.txt
+*.cookies
+*.cookie
 
 # IDE
 .vscode/
@@ -24,3 +31,9 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs y temporales
+*.log
+*.tmp
+temp/
+tmp/
